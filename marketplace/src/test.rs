@@ -761,40 +761,307 @@ fn test_paginated_discovery() {
 
     // Page 1: 2 items
     let page1 = f.client.get_merchants(&0, &2);
-    assert_eq!(page1.len(), 2);
-    assert_eq!(page1.get(0).unwrap().id, 1);
-    assert_eq!(page1.get(1).unwrap().id, 2);
+    assert_eq!(page1.items.len(), 2);
+    assert_eq!(page1.total, 5);
+    assert_eq!(page1.next_offset, Some(2));
+    assert_eq!(page1.items.get(0).unwrap().id, 1);
+    assert_eq!(page1.items.get(1).unwrap().id, 2);
 
     // Page 2: 2 items
     let page2 = f.client.get_merchants(&2, &2);
-    assert_eq!(page2.len(), 2);
-    assert_eq!(page2.get(0).unwrap().id, 3);
-    assert_eq!(page2.get(1).unwrap().id, 4);
+    assert_eq!(page2.items.len(), 2);
+    assert_eq!(page2.total, 5);
+    assert_eq!(page2.next_offset, Some(4));
+    assert_eq!(page2.items.get(0).unwrap().id, 3);
+    assert_eq!(page2.items.get(1).unwrap().id, 4);
 
     // Page 3: 1 item remaining
     let page3 = f.client.get_merchants(&4, &2);
-    assert_eq!(page3.len(), 1);
-    assert_eq!(page3.get(0).unwrap().id, 5);
+    assert_eq!(page3.items.len(), 1);
+    assert_eq!(page3.total, 5);
+    assert_eq!(page3.next_offset, None);
+    assert_eq!(page3.items.get(0).unwrap().id, 5);
 
     // Offset out of bounds
     let page_empty = f.client.get_merchants(&10, &2);
-    assert_eq!(page_empty.len(), 0);
+    assert_eq!(page_empty.items.len(), 0);
+    assert_eq!(page_empty.total, 5);
+    assert_eq!(page_empty.next_offset, None);
 
     // Category discovery
     let tech_merchants = f
         .client
         .get_merchants_by_category(&symbol_short!("tech"), &0, &10);
-    assert_eq!(tech_merchants.len(), 3);
-    assert_eq!(tech_merchants.get(0).unwrap().id, 1);
-    assert_eq!(tech_merchants.get(1).unwrap().id, 2);
-    assert_eq!(tech_merchants.get(2).unwrap().id, 3);
+    assert_eq!(tech_merchants.items.len(), 3);
+    assert_eq!(tech_merchants.total, 3);
+    assert_eq!(tech_merchants.next_offset, None);
+    assert_eq!(tech_merchants.items.get(0).unwrap().id, 1);
+    assert_eq!(tech_merchants.items.get(1).unwrap().id, 2);
+    assert_eq!(tech_merchants.items.get(2).unwrap().id, 3);
 
     let books_merchants = f
         .client
         .get_merchants_by_category(&symbol_short!("books"), &0, &10);
-    assert_eq!(books_merchants.len(), 2);
-    assert_eq!(books_merchants.get(0).unwrap().id, 4);
-    assert_eq!(books_merchants.get(1).unwrap().id, 5);
+    assert_eq!(books_merchants.items.len(), 2);
+    assert_eq!(books_merchants.total, 2);
+    assert_eq!(books_merchants.next_offset, None);
+    assert_eq!(books_merchants.items.get(0).unwrap().id, 4);
+    assert_eq!(books_merchants.items.get(1).unwrap().id, 5);
+}
+
+#[test]
+fn test_status_filtered_discovery() {
+    let f = TestFixture::setup();
+    let owner1 = Address::generate(&f.env);
+    let owner2 = Address::generate(&f.env);
+    let owner3 = Address::generate(&f.env);
+    let owner4 = Address::generate(&f.env);
+
+    // Register 4 merchants
+    let id1 = f.client.register_merchant(
+        &owner1,
+        &RegisterParams {
+            name: String::from_str(&f.env, "Store 1"),
+            description: String::from_str(&f.env, "Desc"),
+            category: symbol_short!("tech"),
+            image_url: String::from_str(&f.env, "url"),
+            metadata: None,
+            required_verifications: 1,
+        },
+    );
+
+    let id2 = f.client.register_merchant(
+        &owner2,
+        &RegisterParams {
+            name: String::from_str(&f.env, "Store 2"),
+            description: String::from_str(&f.env, "Desc"),
+            category: symbol_short!("tech"),
+            image_url: String::from_str(&f.env, "url"),
+            metadata: None,
+            required_verifications: 1,
+        },
+    );
+
+    let id3 = f.client.register_merchant(
+        &owner3,
+        &RegisterParams {
+            name: String::from_str(&f.env, "Store 3"),
+            description: String::from_str(&f.env, "Desc"),
+            category: symbol_short!("tech"),
+            image_url: String::from_str(&f.env, "url"),
+            metadata: None,
+            required_verifications: 1,
+        },
+    );
+
+    let id4 = f.client.register_merchant(
+        &owner4,
+        &RegisterParams {
+            name: String::from_str(&f.env, "Store 4"),
+            description: String::from_str(&f.env, "Desc"),
+            category: symbol_short!("tech"),
+            image_url: String::from_str(&f.env, "url"),
+            metadata: None,
+            required_verifications: 1,
+        },
+    );
+
+    // All 4 merchants are in Registered status
+    let all_merchants = f.client.get_merchants(&0, &10);
+    assert_eq!(all_merchants.items.len(), 4);
+    assert_eq!(all_merchants.total, 4);
+
+    // Suspend merchant 2
+    f.client.suspend_merchant(&f.admin, &id2);
+
+    // Close merchant 3
+    f.client.close_merchant(&f.admin, &id3, &symbol_short!("test"));
+
+    // Get merchants by Registered status (should be id1 and id4)
+    let registered = f.client.get_merchants_by_status(&MerchantStatus::Registered, &0, &10);
+    assert_eq!(registered.items.len(), 2);
+    assert_eq!(registered.total, 2);
+    assert_eq!(registered.next_offset, None);
+    assert_eq!(registered.items.get(0).unwrap().id, id1);
+    assert_eq!(registered.items.get(0).unwrap().status, MerchantStatus::Registered);
+    assert_eq!(registered.items.get(1).unwrap().id, id4);
+    assert_eq!(registered.items.get(1).unwrap().status, MerchantStatus::Registered);
+
+    // Get merchants by Suspended status (should be id2)
+    let suspended = f.client.get_merchants_by_status(&MerchantStatus::Suspended, &0, &10);
+    assert_eq!(suspended.items.len(), 1);
+    assert_eq!(suspended.total, 1);
+    assert_eq!(suspended.items.get(0).unwrap().id, id2);
+    assert_eq!(suspended.items.get(0).unwrap().status, MerchantStatus::Suspended);
+
+    // Get merchants by Closed status (should be id3)
+    let closed = f.client.get_merchants_by_status(&MerchantStatus::Closed, &0, &10);
+    assert_eq!(closed.items.len(), 1);
+    assert_eq!(closed.total, 1);
+    assert_eq!(closed.items.get(0).unwrap().id, id3);
+    assert_eq!(closed.items.get(0).unwrap().status, MerchantStatus::Closed);
+
+    // Get merchants by Verified status (should be empty)
+    let verified = f.client.get_merchants_by_status(&MerchantStatus::Verified, &0, &10);
+    assert_eq!(verified.items.len(), 0);
+    assert_eq!(verified.total, 0);
+    assert_eq!(verified.next_offset, None);
+}
+
+#[test]
+fn test_status_filtered_discovery_by_category() {
+    let f = TestFixture::setup();
+    let owner1 = Address::generate(&f.env);
+    let owner2 = Address::generate(&f.env);
+    let owner3 = Address::generate(&f.env);
+    let owner4 = Address::generate(&f.env);
+
+    // Register 4 merchants in tech category
+    let id1 = f.client.register_merchant(
+        &owner1,
+        &RegisterParams {
+            name: String::from_str(&f.env, "Tech Store 1"),
+            description: String::from_str(&f.env, "Desc"),
+            category: symbol_short!("tech"),
+            image_url: String::from_str(&f.env, "url"),
+            metadata: None,
+            required_verifications: 1,
+        },
+    );
+
+    let id2 = f.client.register_merchant(
+        &owner2,
+        &RegisterParams {
+            name: String::from_str(&f.env, "Tech Store 2"),
+            description: String::from_str(&f.env, "Desc"),
+            category: symbol_short!("tech"),
+            image_url: String::from_str(&f.env, "url"),
+            metadata: None,
+            required_verifications: 1,
+        },
+    );
+
+    let id3 = f.client.register_merchant(
+        &owner3,
+        &RegisterParams {
+            name: String::from_str(&f.env, "Tech Store 3"),
+            description: String::from_str(&f.env, "Desc"),
+            category: symbol_short!("tech"),
+            image_url: String::from_str(&f.env, "url"),
+            metadata: None,
+            required_verifications: 1,
+        },
+    );
+
+    let id4 = f.client.register_merchant(
+        &owner4,
+        &RegisterParams {
+            name: String::from_str(&f.env, "Tech Store 4"),
+            description: String::from_str(&f.env, "Desc"),
+            category: symbol_short!("tech"),
+            image_url: String::from_str(&f.env, "url"),
+            metadata: None,
+            required_verifications: 1,
+        },
+    );
+
+    // Suspend id2, Close id3
+    f.client.suspend_merchant(&f.admin, &id2);
+    f.client.close_merchant(&f.admin, &id3, &symbol_short!("test"));
+
+    // Get tech merchants by Registered status (should be id1 and id4)
+    let registered = f.client.get_merchants_by_category_status(
+        &symbol_short!("tech"),
+        &MerchantStatus::Registered,
+        &0,
+        &10,
+    );
+    assert_eq!(registered.items.len(), 2);
+    assert_eq!(registered.total, 2);
+    assert_eq!(registered.items.get(0).unwrap().id, id1);
+    assert_eq!(registered.items.get(1).unwrap().id, id4);
+
+    // Get tech merchants by Suspended status (should be id2)
+    let suspended = f.client.get_merchants_by_category_status(
+        &symbol_short!("tech"),
+        &MerchantStatus::Suspended,
+        &0,
+        &10,
+    );
+    assert_eq!(suspended.items.len(), 1);
+    assert_eq!(suspended.total, 1);
+    assert_eq!(suspended.items.get(0).unwrap().id, id2);
+
+    // Get tech merchants by Closed status (should be id3)
+    let closed = f.client.get_merchants_by_category_status(
+        &symbol_short!("tech"),
+        &MerchantStatus::Closed,
+        &0,
+        &10,
+    );
+    assert_eq!(closed.items.len(), 1);
+    assert_eq!(closed.total, 1);
+    assert_eq!(closed.items.get(0).unwrap().id, id3);
+
+    // Get tech merchants by Verified status (should be empty)
+    let verified = f.client.get_merchants_by_category_status(
+        &symbol_short!("tech"),
+        &MerchantStatus::Verified,
+        &0,
+        &10,
+    );
+    assert_eq!(verified.items.len(), 0);
+    assert_eq!(verified.total, 0);
+}
+
+#[test]
+fn test_discovery_page_cursor_fields() {
+    let f = TestFixture::setup();
+
+    for i in 1..=10 {
+        let owner = Address::generate(&f.env);
+        let mut name_bytes = [0u8; 8];
+        name_bytes[0] = b'S';
+        name_bytes[1] = b't';
+        name_bytes[2] = b'o';
+        name_bytes[3] = b'r';
+        name_bytes[4] = b'e';
+        name_bytes[5] = b'0' + (i % 10) as u8;
+        let name = String::from_str(&f.env, core::str::from_utf8(&name_bytes[..6]).unwrap());
+
+        f.client.register_merchant(
+            &owner,
+            &RegisterParams {
+                name,
+                description: String::from_str(&f.env, "Desc"),
+                category: symbol_short!("tech"),
+                image_url: String::from_str(&f.env, "url"),
+                metadata: None,
+                required_verifications: 1,
+            },
+        );
+    }
+
+    // Test cursor pagination with limit 3
+    let page1 = f.client.get_merchants(&0, &3);
+    assert_eq!(page1.total, 10);
+    assert_eq!(page1.items.len(), 3);
+    assert_eq!(page1.next_offset, Some(3), "First page should have next_offset = 3");
+
+    let page2 = f.client.get_merchants(&page1.next_offset.unwrap(), &3);
+    assert_eq!(page2.total, 10);
+    assert_eq!(page2.items.len(), 3);
+    assert_eq!(page2.next_offset, Some(6), "Second page should have next_offset = 6");
+
+    let page3 = f.client.get_merchants(&page2.next_offset.unwrap(), &3);
+    assert_eq!(page3.total, 10);
+    assert_eq!(page3.items.len(), 3);
+    assert_eq!(page3.next_offset, Some(9), "Third page should have next_offset = 9");
+
+    let page4 = f.client.get_merchants(&page3.next_offset.unwrap(), &3);
+    assert_eq!(page4.total, 10);
+    assert_eq!(page4.items.len(), 1, "Last page should have 1 item");
+    assert_eq!(page4.next_offset, None, "Last page should have None for next_offset");
 }
 
 #[test]
@@ -981,8 +1248,8 @@ fn test_flight_merchant_lifecycle_and_discovery() {
     let discovery = f
         .client
         .get_merchants_by_category(&symbol_short!("crafts"), &0, &10);
-    assert_eq!(discovery.len(), 1);
-    let item = discovery.get(0).unwrap();
+    assert_eq!(discovery.items.len(), 1);
+    let item = discovery.items.get(0).unwrap();
     assert_eq!(item.id, merchant_id);
     assert_eq!(item.name, String::from_str(&f.env, "Stellar Artisans"));
     assert_eq!(item.category, symbol_short!("crafts"));
